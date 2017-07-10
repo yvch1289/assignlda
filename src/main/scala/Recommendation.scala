@@ -19,7 +19,7 @@ object Recommendation extends Recommendation {
                              maxIterations: Int = 10,
                              docConcentration: Double = -1,
                              topicConcentration: Double = -1,
-                             vocabSize: Int = 1000,
+                             vocabSize: Int = 100,
                              algorithm: String = "em",
                              checkpointDir: Option[String] = None,
                              checkpointInterval: Int = 10)
@@ -37,24 +37,31 @@ object Recommendation extends Recommendation {
     import sparkSession.implicits._
 
     val df = sparkSession.read
-      .format("com.databricks.spark.xml").option("rowTag", "article")
-      .load("C:/Users/dodge/Downloads/dblp.xml/input.xml")
+      .format("com.databricks.spark.xml").option("rowTag", "article")//.option("mode", "DROPMALFORMED") //.option("excludeAttribute", "true")//.option("mode","DROPMALFORMED")
+      .load("C:/Users/dodge/Downloads/dblp.xml/dblp.xml")//"C:/Users/dodge/Downloads/dblp.xml/dblp.xml.gz")
+
 
     val selectedData = df.select("author", "title")
-
+    println(selectedData.printSchema())
     // Load documents, and prepare them for LDA.
     val preprocessStart = System.nanoTime()
 
     //merge the author into the title docs in order to maintain relationship, adding a suffix to name to retrieve them easily from word to topic distrib/weight
-    val my_udf = udf { (arra: Seq[Row], title: String) =>
-      if (arra != null && title != null)
-        arra.map(r => r.get(0).asInstanceOf[String].filterNot((x: Char) => x == '.' || x.isWhitespace)
-          .concat("Authz")).mkString(" ") + " " + title.filterNot((x: Char) => x == '.') else ""
+    val my_udf = udf{
+
+      (arra: Seq[Row], title: Row) =>
+
+          if (arra != null && title != null)
+            arra.map(r => r.get(0).asInstanceOf[String].filterNot((x: Char) => x == '.' || x.isWhitespace)
+              .concat("Authz")).mkString(" ") + " " + (title.get(0).asInstanceOf[String] match {
+              case null => ""
+              case x => x}).filterNot((x: Char) => x == '.') else ""
+
     }
 
-    val ldainput = selectedData.withColumn("autz", my_udf($"author", $"title")).select($"autz")
+    val ldainput = selectedData.withColumn("merged", my_udf($"author", $"title")) //.select($"autz")
 
-    val tokenizer = new RegexTokenizer().setInputCol("autz").setOutputCol("rawTokens")
+    val tokenizer = new RegexTokenizer().setInputCol("merged").setOutputCol("rawTokens")
     val stopWordsRemover = new StopWordsRemover().setInputCol("rawTokens").setOutputCol("tokens")
     stopWordsRemover.setStopWords(stopWordsRemover.getStopWords)
     val countVectorizer = new CountVectorizer().setVocabSize(params.vocabSize).setInputCol("tokens").setOutputCol("features")
@@ -156,7 +163,7 @@ object Recommendation extends Recommendation {
           op =>
             op match {
               case Some(a) => {
-                println("your mentor can be :" + a._2.substring(0,a._2.indexOf("authz")) + " weight = " + a._1)
+                println("your mentor can be :" + a._2.substring(0, a._2.indexOf("authz")) + " weight = " + a._1)
               }
               case _ =>
             }
